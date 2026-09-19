@@ -1,0 +1,292 @@
+import json
+import random
+
+# This string contains the entire frontend: HTML, Tailwind CSS, and Three.js 3D logic
+HTML_CONTENT = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AWS Serverless Nebula Command</title>
+    <!-- Tailwind for the HUD styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js for the 3D Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: monospace; }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0; }
+        
+        /* UI Layer Overlay */
+        #ui-layer { 
+            position: absolute; z-index: 10; pointer-events: none; 
+            width: 100%; height: 100%; display: flex; 
+            align-items: center; justify-content: center;
+        }
+        
+        /* Glassmorphism Cyberpunk Terminal */
+        .glass-panel { 
+            pointer-events: auto; background: rgba(5, 10, 20, 0.6); 
+            backdrop-filter: blur(8px); border: 1px solid rgba(0, 255, 255, 0.3); 
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.15); 
+        }
+        
+        .cyber-input { 
+            background: rgba(0,0,0,0.7); border: 1px solid #0ff; color: #0ff; 
+            outline: none; box-shadow: inset 0 0 10px rgba(0, 255, 255, 0.2); 
+        }
+        .cyber-input:focus { box-shadow: inset 0 0 20px rgba(0, 255, 255, 0.4), 0 0 10px rgba(0, 255, 255, 0.3); }
+        
+        .cyber-btn { 
+            background: rgba(0, 255, 255, 0.1); border: 1px solid #0ff; 
+            color: #0ff; text-transform: uppercase; letter-spacing: 2px; 
+            transition: all 0.3s ease; 
+        }
+        .cyber-btn:hover { 
+            background: rgba(0, 255, 255, 0.3); box-shadow: 0 0 20px #0ff; 
+            text-shadow: 0 0 8px #0ff; cursor: pointer;
+        }
+        
+        .scanline { 
+            position: absolute; top:0; left:0; width: 100vw; height: 100vh; 
+            background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.2));
+            background-size: 100% 4px; pointer-events: none; z-index: 5;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <div class="scanline"></div>
+    
+    <div id="ui-layer">
+        <div class="glass-panel p-8 rounded-xl max-w-md w-full text-center text-cyan-400">
+            <h1 class="text-3xl font-bold mb-1 tracking-widest text-white drop-shadow-[0_0_10px_rgba(0,255,255,0.8)]">
+                NEBULA_CMD
+            </h1>
+            <p class="text-[10px] mb-8 text-cyan-600 uppercase tracking-[0.3em]">AWS Serverless Node Active</p>
+            
+            <input id="commandInput" type="text" 
+                   class="cyber-input w-full p-4 rounded mb-4 text-center placeholder-cyan-900 transition-all uppercase" 
+                   placeholder="TYPE 'WARP' OR 'SCAN'">
+            
+            <button onclick="transmitCommand()" id="actionBtn" class="cyber-btn w-full py-4 px-4 rounded font-bold">
+                Transmit to Orbit
+            </button>
+
+            <div id="telemetry" class="mt-6 hidden text-left space-y-2 border-t border-cyan-800/50 pt-4">
+                <p class="text-[10px] text-cyan-600 uppercase tracking-widest">Incoming Subspace Telemetry...</p>
+                <p id="statusMsg" class="text-white font-medium text-lg drop-shadow-[0_0_5px_rgba(0,255,255,0.5)]"></p>
+                <div class="flex justify-between text-xs mt-2 text-cyan-400">
+                    <span>SECTOR: <span id="sectorVal" class="text-white font-bold">--</span></span>
+                    <span>DISTANCE: <span id="distVal" class="text-white font-bold">--</span> LY</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. THREE.JS SCENE SETUP ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x000000, 0.0015);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+        camera.position.z = 400;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        container.appendChild(renderer.domElement);
+
+        // --- 2. CREATE 3D STARFIELD ---
+        const starGeo = new THREE.BufferGeometry();
+        const starCount = 8000;
+        const positions = new Float32Array(starCount * 3);
+
+        for(let i = 0; i < starCount * 3; i += 3) {
+            positions[i] = (Math.random() - 0.5) * 2000;   // x
+            positions[i+1] = (Math.random() - 0.5) * 2000; // y
+            positions[i+2] = (Math.random() - 0.5) * 2000; // z
+        }
+        
+        starGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        
+        const starMaterial = new THREE.PointsMaterial({
+            color: 0xaaaaaa, size: 1.5, transparent: true, opacity: 0.8, sizeAttenuation: true
+        });
+
+        const stars = new THREE.Points(starGeo, starMaterial);
+        scene.add(stars);
+
+        // --- 3. CREATE CENTRAL WIREFRAME ENTITY ---
+        const planetGeo = new THREE.IcosahedronGeometry(60, 2);
+        const planetMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true, transparent: true, opacity: 0.15 });
+        const planet = new THREE.Mesh(planetGeo, planetMat);
+        scene.add(planet);
+        
+        const coreGeo = new THREE.IcosahedronGeometry(35, 1);
+        const coreMat = new THREE.MeshBasicMaterial({ color: 0xff00ff, wireframe: true, transparent: true, opacity: 0.4 });
+        const core = new THREE.Mesh(coreGeo, coreMat);
+        scene.add(core);
+
+        // --- 4. INTERACTIVE PHYSICS & CONTROLS ---
+        let targetSpeed = 0.5; 
+        let currentSpeed = 0.5;
+        let mouseX = 0;
+        let mouseY = 0;
+
+        // Mouse Parallax Effect
+        document.addEventListener('mousemove', (e) => {
+            mouseX = (e.clientX - window.innerWidth / 2) * 0.05;
+            mouseY = (e.clientY - window.innerHeight / 2) * 0.05;
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // The Main Render Loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Smoothly interpolate speed (handles the warp transition)
+            currentSpeed += (targetSpeed - currentSpeed) * 0.05;
+
+            // Rotate central entity
+            planet.rotation.y += 0.002 * currentSpeed;
+            planet.rotation.x += 0.001 * currentSpeed;
+            core.rotation.y -= 0.003 * currentSpeed;
+
+            // Apply camera parallax
+            camera.position.x += (mouseX - camera.position.x) * 0.05;
+            camera.position.y += (-mouseY - camera.position.y) * 0.05;
+            camera.lookAt(scene.position);
+
+            // Move stars forward to create flight effect
+            const positions = stars.geometry.attributes.position.array;
+            for(let i = 0; i < starCount * 3; i += 3) {
+                positions[i+2] += currentSpeed;
+                
+                // If star passes camera, reset it far away
+                if (positions[i+2] > 500) {
+                    positions[i+2] = -1000;
+                    positions[i] = (Math.random() - 0.5) * 2000;
+                    positions[i+1] = (Math.random() - 0.5) * 2000;
+                }
+            }
+            stars.geometry.attributes.position.needsUpdate = true;
+            
+            // Dynamic color shifting during warp
+            if (currentSpeed > 5) {
+                starMaterial.color.setHex(0x00ffff);
+                coreMat.color.setHex(0x00ffff);
+            } else {
+                starMaterial.color.setHex(0xaaaaaa);
+                coreMat.color.setHex(0xff00ff);
+            }
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // --- 5. AWS LAMBDA COMMUNICATION ---
+        async function transmitCommand() {
+            const btn = document.getElementById('actionBtn');
+            const inputVal = document.getElementById('commandInput').value.toLowerCase() || 'scan';
+            
+            btn.innerText = 'TRANSMITTING...';
+            btn.style.opacity = '0.5';
+            
+            // Engage a pre-warp boost while waiting for Lambda
+            targetSpeed = 10.0; 
+            
+            try {
+                // Post data to the Python backend running on this URL
+                const response = await fetch(window.location.href, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command: inputVal })
+                });
+                
+                const data = await response.json();
+                
+                // TRIGGER 3D ANIMATIONS BASED ON PYTHON RESPONSE
+                if (data.action_type === 'warp') {
+                    targetSpeed = 60.0; // Extreme warp speed!
+                    setTimeout(() => targetSpeed = 0.5, 4000); // Drop out of warp after 4s
+                } else if (data.action_type === 'scan') {
+                    targetSpeed = 0.1; // Halt to scan
+                    planet.scale.set(1.5, 1.5, 1.5); // Pulse planet size
+                    setTimeout(() => { targetSpeed = 0.5; planet.scale.set(1, 1, 1); }, 2000);
+                } else {
+                    targetSpeed = 0.5;
+                }
+                
+                // Update the terminal UI
+                document.getElementById('statusMsg').innerText = data.status;
+                document.getElementById('sectorVal').innerText = data.sector;
+                document.getElementById('distVal').innerText = data.distance_ly;
+                document.getElementById('telemetry').classList.remove('hidden');
+                
+            } catch (error) {
+                document.getElementById('statusMsg').innerText = "SUBSPACE COMMS FAILURE";
+                targetSpeed = 0.5;
+            }
+            
+            btn.innerText = 'TRANSMIT TO ORBIT';
+            btn.style.opacity = '1';
+        }
+    </script>
+</body>
+</html>
+"""
+
+def lambda_handler(event, context):
+    http_method = event.get('requestContext', {}).get('http', {}).get('method', 'GET')
+    
+    # POST REQUEST: Terminal command received from the browser
+    if http_method == 'POST':
+        try:
+            body = json.loads(event.get('body', '{}'))
+            command = body.get('command', '').lower()
+            
+            # --- PYTHON BACKEND LOGIC ---
+            sector = f"{random.randint(10, 99)}-{random.choice('ABCDEF')}"
+            distance = random.randint(4, 1000)
+            
+            # Process command string to determine output and 3D action
+            if "warp" in command:
+                speed_factor = distance / random.uniform(1.2, 5.0)
+                status = f"Warping to Sector {sector} at factor {speed_factor:.1f}"
+                action_type = "warp"
+            elif "scan" in command:
+                anomalies = random.randint(0, 3)
+                status = f"Scan complete. {anomalies} anomalies found in {sector}."
+                action_type = "scan"
+            else:
+                status = f"Coordinates locked on Sector {sector}."
+                action_type = "idle"
+                
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({
+                    "status": status,
+                    "action_type": action_type,
+                    "sector": sector,
+                    "distance_ly": distance
+                })
+            }
+        except Exception as e:
+            return {"statusCode": 400, "body": json.dumps({"error": str(e)})}
+            
+    # GET REQUEST: Initial page load, serve the 3D Engine and HTML
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "text/html" 
+        },
+        "body": HTML_CONTENT
+    }
